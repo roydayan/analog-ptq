@@ -1,0 +1,29 @@
+# Example configuration for evaluation only (no quantization)
+# 
+# Useful for:
+#   - Baseline model evaluation
+#   - Evaluating pre-quantized models
+# 
+# Usage:
+#   analog-ptq configs/examples/eval_only.yaml
+
+experiment:
+  name: "llama2-7b-baseline"
+  output_dir: "./outputs/llama2-7b-baseline"
+  seed: 42
+
+model:
+  name_or_path: "meta-llama/Llama-2-7b-hf"
+  dtype: "float16"
+  device_map: "auto"
+
+# No quantization section - model will be evaluated as-is
+
+evaluation:
+  tasks:
+    - "hellaswag"
+    - "arc_easy"
+    - "arc_challenge"
+    - "winogrande"
+  batch_size: 8
+  num_fewshot: 0

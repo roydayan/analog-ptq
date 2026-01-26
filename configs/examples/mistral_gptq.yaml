@@ -1,0 +1,38 @@
+# Example configuration for quantizing Mistral-7B with GPTQ
+# 
+# Usage:
+#   analog-ptq configs/examples/mistral_gptq.yaml
+
+experiment:
+  name: "mistral-7b-gptq-4bit"
+  output_dir: "./outputs/mistral-7b-gptq"
+  seed: 42
+
+model:
+  name_or_path: "mistralai/Mistral-7B-v0.1"
+  dtype: "bfloat16"
+  device_map: "auto"
+  trust_remote_code: false
+
+quantization:
+  method: "gptq"
+  bits: 4
+  group_size: 128
+  symmetric: false
+  damp_percent: 0.01
+  block_size: 128
+  actorder: true  # Use activation ordering for better accuracy
+  calibration:
+    dataset: "wikitext"
+    num_samples: 128
+    seq_length: 2048
+    seed: 42
+
+evaluation:
+  tasks:
+    - "hellaswag"
+    - "winogrande"
+    - "arc_easy"
+    - "arc_challenge"
+  batch_size: 8
+  num_fewshot: 5
