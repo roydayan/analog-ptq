@@ -27,62 +27,100 @@ import torch
 
 
 def load_quantized_model(model_path: str):
-    """Load a quantized model from disk."""
+    """Load a quantized model from disk with proper QuantizedLinear layers."""
     print(f"Loading quantized model from: {model_path}")
     
     # Add the project root to path for imports
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, project_root)
     
+    import json
     from transformers import AutoTokenizer
+    from analog_ptq.quantization.utils import QuantizedLinear
     
-    # Load tokenizer from original model (quantized model may not have tokenizer saved)
+    # Load quantization config
     config_path = os.path.join(model_path, "quantization_config.json")
     if os.path.exists(config_path):
-        import json
         with open(config_path) as f:
-            config = json.load(f)
-        original_model = config.get("original_model", "meta-llama/Llama-3.2-1B-Instruct")
+            quant_config = json.load(f)
+        original_model = quant_config.get("original_model", "meta-llama/Llama-3.2-1B-Instruct")
+        bits = quant_config.get("bits", 4)
+        group_size = quant_config.get("group_size", 128)
     else:
         original_model = "meta-llama/Llama-3.2-1B-Instruct"
+        bits = 4
+        group_size = 128
     
     print(f"Loading tokenizer from: {original_model}")
     tokenizer = AutoTokenizer.from_pretrained(original_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Load the quantized model
-    # First try loading as a regular HF model
-    try:
-        from transformers import AutoModelForCausalLM
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=torch.float16,
-            device_map="cuda:0" if torch.cuda.is_available() else "cpu",
-            trust_remote_code=True,
-        )
-        print("Loaded model using AutoModelForCausalLM")
-    except Exception as e:
-        print(f"Could not load with AutoModelForCausalLM: {e}")
-        print("Trying to load with custom QuantizedLinear layers...")
-        
-        # Load using our custom wrapper
-        from analog_ptq.models.wrapper import ModelWrapper
-        from analog_ptq.models.loader import load_model
-        
-        # Load the base model architecture
-        model = load_model(
-            original_model,
-            dtype="float16",
-            device_map="cuda:0" if torch.cuda.is_available() else "cpu",
-        )
-        
-        # Load quantized state dict
+    # Load the base model architecture first
+    from analog_ptq.models.loader import load_model
+    print(f"Loading base model architecture from: {original_model}")
+    model = load_model(
+        original_model,
+        dtype="float16",
+        device_map="cuda:0" if torch.cuda.is_available() else "cpu",
+    )
+    
+    # Load the saved state dict
+    state_dict_path = os.path.join(model_path, "model.safetensors")
+    if not os.path.exists(state_dict_path):
         state_dict_path = os.path.join(model_path, "pytorch_model.bin")
-        if os.path.exists(state_dict_path):
+    
+    if os.path.exists(state_dict_path):
+        print(f"Loading weights from: {state_dict_path}")
+        if state_dict_path.endswith(".safetensors"):
+            from safetensors.torch import load_file
+            state_dict = load_file(state_dict_path)
+        else:
             state_dict = torch.load(state_dict_path, map_location="cpu")
-            model.load_state_dict(state_dict, strict=False)
-            print("Loaded quantized weights")
+        
+        # Find all quantized layers (those with qweight, scales, zeros)
+        quantized_layers = set()
+        for key in state_dict.keys():
+            if ".qweight" in key:
+                # Extract layer path: model.layers.0.mlp.down_proj.qweight -> model.layers.0.mlp.down_proj
+                layer_path = key.rsplit(".qweight", 1)[0]
+                quantized_layers.add(layer_path)
+        
+        print(f"Found {len(quantized_layers)} quantized layers to restore")
+        
+        # Replace Linear layers with QuantizedLinear and load weights
+        for layer_path in quantized_layers:
+            # Navigate to the parent module
+            parts = layer_path.split(".")
+            parent = model
+            for part in parts[:-1]:
+                parent = getattr(parent, part)
+            
+            layer_name = parts[-1]
+            original_layer = getattr(parent, layer_name)
+            
+            # Create QuantizedLinear
+            qlayer = QuantizedLinear(
+                in_features=original_layer.in_features,
+                out_features=original_layer.out_features,
+                bits=bits,
+                group_size=group_size,
+                bias=original_layer.bias is not None,
+            )
+            
+            # Load quantized weights
+            qlayer.qweight.copy_(state_dict[f"{layer_path}.qweight"])
+            qlayer.scales.copy_(state_dict[f"{layer_path}.scales"])
+            qlayer.zeros.copy_(state_dict[f"{layer_path}.zeros"])
+            if original_layer.bias is not None and f"{layer_path}.bias" in state_dict:
+                qlayer.bias.copy_(state_dict[f"{layer_path}.bias"])
+            
+            # Replace the layer
+            setattr(parent, layer_name, qlayer.to(model.device))
+        
+        print(f"Successfully restored {len(quantized_layers)} quantized layers")
+    else:
+        print(f"Warning: No weights file found at {model_path}")
     
     return model, tokenizer
 

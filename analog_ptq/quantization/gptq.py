@@ -142,8 +142,8 @@ class GPTQQuantizer(BaseQuantizer):
                     linear_inputs,
                     device,
                 )
-                
-                # Clear captured inputs to save memory
+            
+            # Clear captured inputs to save memory
                 del linear_inputs
             
             torch.cuda.empty_cache() if torch.cuda.is_available() else None
