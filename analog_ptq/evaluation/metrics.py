@@ -34,6 +34,9 @@ class PerformanceMetrics:
     # Accuracy metrics (from evaluation)
     eval_results: Dict[str, Any] = field(default_factory=dict)
     
+    # Custom metrics (e.g., noise injection stats)
+    custom: Dict[str, Any] = field(default_factory=dict)
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary.
         
@@ -49,6 +52,7 @@ class PerformanceMetrics:
             "num_parameters": self.num_parameters,
             "num_quantized_params": self.num_quantized_params,
             "eval_results": self.eval_results,
+            "custom": self.custom,
         }
 
 
@@ -237,6 +241,15 @@ class MetricsCollector:
             self.metrics.eval_results = results["results"]
         else:
             self.metrics.eval_results = results
+    
+    def add_custom_metric(self, name: str, value: Any) -> None:
+        """Add a custom metric.
+        
+        Args:
+            name: Metric name
+            value: Metric value (can be any serializable object)
+        """
+        self.metrics.custom[name] = value
     
     def get_metrics(self) -> PerformanceMetrics:
         """Get the collected metrics.

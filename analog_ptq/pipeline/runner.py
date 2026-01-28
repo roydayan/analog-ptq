@@ -14,6 +14,7 @@ from analog_ptq.evaluation.harness import LMEvalHarness
 from analog_ptq.evaluation.metrics import MetricsCollector
 from analog_ptq.models.loader import load_model, load_tokenizer
 from analog_ptq.models.wrapper import ModelWrapper
+from analog_ptq.noise import WeightNoiseInjector, DynamicNoiseWrapper
 from analog_ptq.pipeline.registry import registry
 from analog_ptq.quantization.calibration import CalibrationDataLoader
 from analog_ptq.utils.logging import get_logger, setup_logging
@@ -29,6 +30,7 @@ class ExperimentRunner:
     - Loading models and tokenizers
     - Preparing calibration data
     - Running quantization
+    - Applying noise injection (static and/or dynamic)
     - Evaluating on benchmarks
     - Saving results and models
     
@@ -58,6 +60,8 @@ class ExperimentRunner:
         self.model = None
         self.tokenizer = None
         self.wrapper = None
+        self.noise_injector = None
+        self.dynamic_noise_wrapper = None
     
     def _set_seed(self, seed: int) -> None:
         """Set random seeds for reproducibility.
@@ -185,6 +189,71 @@ class ExperimentRunner:
         
         return self.wrapper
     
+    def apply_noise(self) -> ModelWrapper:
+        """Apply noise injection to the model.
+        
+        Supports three modes:
+        - "static": Permanent noise added to weights
+        - "dynamic": Noise added during each forward pass
+        - "both": Both static and dynamic noise
+        
+        Returns:
+            Model wrapper with noise applied
+        """
+        if self.config.noise is None or not self.config.noise.enabled:
+            logger.info("No noise injection configured, skipping...")
+            return self.wrapper
+        
+        logger.info("=" * 50)
+        logger.info("Applying noise injection...")
+        logger.info("=" * 50)
+        
+        noise_config = self.config.noise
+        mode = noise_config.mode
+        
+        logger.info(f"  Mode: {mode}")
+        logger.info(f"  Function: {noise_config.function}")
+        logger.info(f"  Parameters: {noise_config.function_params}")
+        
+        # Apply static noise (permanent weight perturbation)
+        if mode in ("static", "both"):
+            logger.info("Applying static noise...")
+            self.noise_injector = WeightNoiseInjector(
+                noise_function=noise_config.function,
+                function_params=noise_config.function_params,
+                seed=noise_config.seed,
+                target_layers=noise_config.target_layers,
+            )
+            self.wrapper = self.noise_injector.apply(self.wrapper)
+            
+            # Log statistics
+            logger.info(self.noise_injector.summary())
+            
+            # Add noise stats to metrics
+            self.metrics.add_custom_metric(
+                "noise_injection",
+                {
+                    "mode": mode,
+                    "function": noise_config.function,
+                    "function_params": noise_config.function_params,
+                    "stats": self.noise_injector.get_stats(),
+                }
+            )
+        
+        # Apply dynamic noise (inference-time noise)
+        if mode in ("dynamic", "both"):
+            logger.info("Applying dynamic noise wrapper...")
+            self.dynamic_noise_wrapper = DynamicNoiseWrapper(
+                noise_function=noise_config.function,
+                function_params=noise_config.function_params,
+                target_layers=noise_config.target_layers,
+            )
+            self.wrapper = self.dynamic_noise_wrapper.apply(self.wrapper)
+            
+            logger.info(f"  Wrapped {len(self.dynamic_noise_wrapper.get_wrapped_layers())} layers")
+        
+        return self.wrapper
+    
     def evaluate(self) -> Dict[str, Any]:
         """Run evaluation on the model.
         
@@ -237,6 +306,10 @@ class ExperimentRunner:
         if self.config.quantization:
             calibration_data = self.prepare_calibration_data()
             self.quantize(calibration_data)
+        
+        # Noise injection (if configured)
+        if self.config.noise:
+            self.apply_noise()
         
         # Evaluation (if configured)
         eval_results = {}

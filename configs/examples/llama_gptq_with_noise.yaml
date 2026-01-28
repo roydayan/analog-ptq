@@ -1,0 +1,65 @@
+# Example configuration for quantizing LLaMA-3.2-1B-Instruct with GPTQ
+# and applying Gaussian noise to simulate analog computing effects.
+# 
+# Usage:
+#   analog-ptq configs/examples/llama_gptq_with_noise.yaml
+#   # or
+#   python scripts/run_experiment.py configs/examples/llama_gptq_with_noise.yaml
+
+experiment:
+  name: "llama3.2-1b-instruct-gptq-4bit-noisy"
+  output_dir: "./outputs/llama3.2-1b-instruct-gptq-noisy"
+  seed: 42
+
+model:
+  name_or_path: "meta-llama/Llama-3.2-1B-Instruct"
+  dtype: "float16"
+  device_map: "cuda:0"
+  trust_remote_code: false
+
+quantization:
+  method: "gptq"
+  bits: 4
+  group_size: 128
+  symmetric: false
+  damp_percent: 0.01
+  block_size: 128
+  actorder: false
+  calibration:
+    dataset: "wikitext"
+    num_samples: 128
+    seq_length: 2048
+    seed: 42
+
+# Noise injection configuration
+# Simulates analog computing hardware noise by adding Gaussian noise to weights
+noise:
+  enabled: true
+  # Built-in functions: "constant", "proportional", "polynomial", "sqrt", "relative", "affine"
+  # Or register your own custom function
+  function: "proportional"
+  # Parameters passed to the noise function
+  # For "proportional": sigma = scale * |weight|
+  function_params:
+    scale: 0.05
+  # Noise application mode:
+  # - "static": Applied once after quantization (permanent)
+  # - "dynamic": Applied at inference time (fresh noise each forward pass)
+  # - "both": Both static and dynamic noise
+  mode: "static"
+  # Random seed for reproducible noise
+  seed: 42
+  # Optional: target specific layers (default: all quantized layers)
+  # target_layers:
+  #   - "self_attn"
+  #   - "mlp"
+
+# Evaluation disabled - uncomment to evaluate
+# evaluation:
+#   tasks:
+#     - "winogrande"
+#     - "piqa" 
+#     - "boolq"
+#   batch_size: 8
+#   num_fewshot: 0
+#   limit: 100

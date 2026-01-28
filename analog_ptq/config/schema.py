@@ -85,6 +85,47 @@ class QuantizationConfig(BaseModel):
         return v
 
 
+class NoiseConfig(BaseModel):
+    """Gaussian noise injection configuration.
+    
+    Configures noise injection into quantized model weights for analog computing simulation.
+    The noise standard deviation is computed as a function of the weight values.
+    
+    Modes:
+        - "static": Noise is applied once after quantization (permanent weight perturbation)
+        - "dynamic": Noise is applied at inference time during each forward pass
+        - "both": Both static and dynamic noise are applied
+    """
+    
+    enabled: bool = Field(True, description="Whether noise injection is enabled")
+    function: str = Field(
+        "proportional",
+        description="Name of the noise function (e.g., 'constant', 'proportional', 'polynomial')"
+    )
+    function_params: Dict[str, Any] = Field(
+        default_factory=lambda: {"scale": 0.1},
+        description="Parameters passed to the noise function"
+    )
+    mode: str = Field(
+        "static",
+        description="Noise mode: 'static', 'dynamic', or 'both'"
+    )
+    seed: Optional[int] = Field(None, description="Random seed for reproducibility")
+    target_layers: Optional[List[str]] = Field(
+        None,
+        description="Optional list of layer name patterns to target (None = all layers)"
+    )
+    
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        """Validate noise mode."""
+        valid_modes = ["static", "dynamic", "both"]
+        if v.lower() not in valid_modes:
+            raise ValueError(f"mode must be one of {valid_modes}")
+        return v.lower()
+
+
 class EvaluationConfig(BaseModel):
     """Evaluation configuration."""
     
@@ -112,6 +153,7 @@ class ExperimentConfig(BaseModel):
     experiment: ExperimentMeta
     model: ModelConfig
     quantization: Optional[QuantizationConfig] = None
+    noise: Optional[NoiseConfig] = None
     evaluation: Optional[EvaluationConfig] = None
     
     @classmethod
