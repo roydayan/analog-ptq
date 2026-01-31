@@ -46,6 +46,7 @@ dev = [
 
 [project.scripts]
 analog-ptq = "analog_ptq.pipeline.runner:main"
+analog-ptq-compare = "analog_ptq.pipeline.comparison:main"
 
 [project.urls]
 Homepage = "https://github.com/roydayan/analog-ptq"

@@ -43,6 +43,7 @@ class WeightNoiseInjector:
         function_params: Optional[Dict[str, Any]] = None,
         seed: Optional[int] = None,
         target_layers: Optional[List[str]] = None,
+        quantized_only: bool = True,
     ):
         """Initialize the noise injector.
         
@@ -53,6 +54,10 @@ class WeightNoiseInjector:
             seed: Random seed for reproducibility
             target_layers: Optional list of layer name patterns to target.
                           If None, applies to all quantized linear layers.
+            quantized_only: If True (default), only apply noise to QuantizedLinear layers.
+                          This is the correct behavior for simulating analog hardware noise,
+                          as only quantized layers represent the analog weights.
+                          Set to False to also apply noise to regular nn.Linear layers.
         """
         if isinstance(noise_function, str):
             self.noise_fn = get_noise_function(noise_function)
@@ -64,12 +69,14 @@ class WeightNoiseInjector:
         self.function_params = function_params or {}
         self.seed = seed
         self.target_layers = target_layers
+        self.quantized_only = quantized_only
         
         # Statistics tracking
         self._stats: Dict[str, Dict[str, float]] = {}
         
         logger.info(f"Initialized WeightNoiseInjector")
         logger.info(f"  function={self.noise_fn_name}, params={self.function_params}")
+        logger.info(f"  quantized_only={self.quantized_only}")
     
     def apply(
         self,
@@ -128,11 +135,17 @@ class WeightNoiseInjector:
         Returns:
             True if noise should be applied to this layer
         """
-        # Must be a linear or quantized linear layer
-        if not isinstance(module, (nn.Linear, QuantizedLinear)):
-            return False
+        # Check layer type based on quantized_only flag
+        if self.quantized_only:
+            # Only process QuantizedLinear layers (analog hardware simulation)
+            if not isinstance(module, QuantizedLinear):
+                return False
+        else:
+            # Process both Linear and QuantizedLinear layers
+            if not isinstance(module, (nn.Linear, QuantizedLinear)):
+                return False
         
-        # If no target patterns specified, process all
+        # If no target patterns specified, process all eligible layers
         if self.target_layers is None:
             return True
         

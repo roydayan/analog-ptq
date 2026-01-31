@@ -16,6 +16,7 @@ from analog_ptq.models.loader import load_model, load_tokenizer
 from analog_ptq.models.wrapper import ModelWrapper
 from analog_ptq.noise import WeightNoiseInjector, DynamicNoiseWrapper
 from analog_ptq.pipeline.registry import registry
+from analog_ptq.quantization.base import check_cached_model, load_cached_quantized_model
 from analog_ptq.quantization.calibration import CalibrationDataLoader
 from analog_ptq.utils.logging import get_logger, setup_logging
 
@@ -156,6 +157,35 @@ class ExperimentRunner:
         logger.info("=" * 50)
         
         quant_config = self.config.quantization
+        quant_output = self.output_dir / "quantized_model"
+        force_requantize = self.config.experiment.force_requantize
+        
+        # Check for cached model first
+        if check_cached_model(quant_output) and not force_requantize:
+            logger.info(f"Found cached quantized model at {quant_output}")
+            logger.info("Loading cached model (use force_requantize: true to re-quantize)")
+            
+            try:
+                model_config = self.config.model
+                device_map = model_config.device_map
+                
+                model, quant_config_dict = load_cached_quantized_model(
+                    quant_output,
+                    device_map=device_map,
+                    dtype=model_config.dtype,
+                )
+                self.wrapper = ModelWrapper(model)
+                
+                # Measure post-load metrics
+                self.metrics.measure_model_size(self.wrapper)
+                self.metrics.count_quantized_parameters(self.wrapper)
+                
+                logger.info("Cached model loaded successfully")
+                return self.wrapper
+                
+            except Exception as e:
+                logger.warning(f"Failed to load cached model: {e}")
+                logger.info("Falling back to re-quantization...")
         
         # Get quantizer from registry
         quantizer_cls = registry.get_quantizer(quant_config.method)
@@ -179,8 +209,18 @@ class ExperimentRunner:
         self.metrics.measure_model_size(self.wrapper)
         self.metrics.count_quantized_parameters(self.wrapper)
         
-        # Save quantized model if configured
-        quant_output = self.output_dir / "quantized_model"
+        # Verify weight preservation (should be same before/after quantization)
+        self.metrics.verify_weight_preservation(
+            self.metrics._original_linear_weights, 
+            self.wrapper
+        )
+        
+        # Log detailed breakdown in debug mode
+        import os
+        if os.environ.get("NAGPTQ_DEBUG", "0") == "1":
+            self.metrics.log_parameter_breakdown(self.wrapper)
+        
+        # Save quantized model
         quantizer.save(
             self.wrapper, 
             quant_output,
@@ -380,6 +420,11 @@ def run_experiment(config: Union[str, Path, ExperimentConfig]) -> Dict[str, Any]
 
 def main():
     """CLI entry point for running experiments."""
+    import os
+    
+    # Suppress tokenizer parallelism warnings when forking for evaluation
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    
     parser = argparse.ArgumentParser(
         description="Run quantization and evaluation experiments"
     )

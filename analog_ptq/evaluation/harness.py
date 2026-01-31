@@ -165,18 +165,29 @@ class LMEvalHarness:
         for task_name, task_results in results["results"].items():
             if isinstance(task_results, dict):
                 # Find the main accuracy metric
+                # lm-eval returns keys with suffixes like "acc,none" or "acc_norm,none"
                 acc_key = None
-                for key in ["acc", "acc_norm", "exact_match", "f1"]:
-                    if key in task_results:
-                        acc_key = key
+                acc_value = None
+                metric_patterns = ["acc_norm", "acc", "exact_match", "f1"]
+                
+                for metric in metric_patterns:
+                    # Try exact match first
+                    if metric in task_results:
+                        acc_key = metric
+                        acc_value = task_results[metric]
+                        break
+                    # Then try with ,none suffix (newer lm-eval format)
+                    suffixed_key = f"{metric},none"
+                    if suffixed_key in task_results:
+                        acc_key = suffixed_key
+                        acc_value = task_results[suffixed_key]
                         break
                 
-                if acc_key:
-                    acc = task_results[acc_key]
-                    if isinstance(acc, (int, float)):
-                        logger.info(f"  {task_name}: {acc:.4f} ({acc_key})")
+                if acc_key and acc_value is not None:
+                    if isinstance(acc_value, (int, float)):
+                        logger.info(f"  {task_name}: {acc_value:.4f} ({acc_key})")
                     else:
-                        logger.info(f"  {task_name}: {acc} ({acc_key})")
+                        logger.info(f"  {task_name}: {acc_value} ({acc_key})")
                 else:
                     logger.info(f"  {task_name}: {task_results}")
         

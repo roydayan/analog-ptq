@@ -1,0 +1,130 @@
+# Comparison: GPTQ vs NA-GPTQ under Analog Noise
+#
+# This config compares how GPTQ and NA-GPTQ perform when analog noise is applied.
+# NA-GPTQ should be more robust to noise since it was optimized with noise awareness.
+#
+# Variants compared:
+#   1. GPTQ (4-bit) - clean (no noise)
+#   2. GPTQ (4-bit) - with proportional noise (σ = 0.05|w|)
+#   3. NA-GPTQ (4-bit) - clean (no noise)
+#   4. NA-GPTQ (4-bit) - with proportional noise (σ = 0.05|w|)
+#
+# Usage:
+#   analog-ptq-compare configs/examples/comparison_with_noise.yaml
+
+experiment:
+  name: "comparison_with_noise"
+  output_dir: "./outputs/comparison_with_noise"
+  seed: 42
+
+model:
+  name_or_path: "meta-llama/Llama-3.2-1B-Instruct"
+  dtype: "float16"
+  device_map: "auto"
+  trust_remote_code: false
+
+comparison:
+  shared_calibration: true
+  calibration:
+    dataset: "wikitext"
+    num_samples: 128
+    seq_length: 2048
+    seed: 42
+  
+  variants:
+    # GPTQ without noise
+    - name: "gptq_clean"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise: null
+    
+    # GPTQ with proportional noise
+    - name: "gptq_noisy"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise:
+        enabled: true
+        function: "proportional"
+        function_params:
+          scale: 0.05
+        mode: "static"
+        seed: 42
+        target_layers: null
+    
+    # NA-GPTQ without noise (optimized for proportional noise model)
+    - name: "na_gptq_clean"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = sigma0 + alpha*|z| = 0 + 0.05*|z| (matches proportional noise)
+          sigma_params:
+            sigma0: 0.0
+            alpha: 0.05
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise: null
+    
+    # NA-GPTQ with proportional noise (should be more robust)
+    # The noise model during quantization MATCHES the noise injection!
+    - name: "na_gptq_noisy"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = sigma0 + alpha*|z| = 0 + 0.05*|z| (SAME as noise injection below)
+          sigma_params:
+            sigma0: 0.0
+            alpha: 0.05
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise:
+        enabled: true
+        # σ = scale * |w| = 0.05 * |w| (SAME as NA-GPTQ model)
+        function: "proportional"
+        function_params:
+          scale: 0.05
+        mode: "static"
+        seed: 42
+        target_layers: null
+
+evaluation:
+  tasks:
+    - "hellaswag"
+    - "arc_easy"
+  batch_size: 8
+  num_fewshot: null
+  limit: 100  # Set to null for full evaluation
+  device: null

@@ -1,0 +1,219 @@
+# Comparison: Noise Robustness Sweep
+#
+# This config compares GPTQ vs NA-GPTQ across different noise levels.
+# Useful for understanding how NA-GPTQ's advantage scales with noise intensity.
+#
+# Variants:
+#   - GPTQ at noise levels: 0%, 2.5%, 5%, 10%
+#   - NA-GPTQ at noise levels: 0%, 2.5%, 5%, 10%
+#
+# Usage:
+#   analog-ptq-compare configs/examples/comparison_noise_sweep.yaml
+
+experiment:
+  name: "comparison_noise_sweep"
+  output_dir: "./outputs/comparison_noise_sweep"
+  seed: 42
+
+model:
+  name_or_path: "meta-llama/Llama-3.2-1B-Instruct"
+  dtype: "float16"
+  device_map: "auto"
+  trust_remote_code: false
+
+comparison:
+  shared_calibration: true
+  calibration:
+    dataset: "wikitext"
+    num_samples: 128
+    seq_length: 2048
+    seed: 42
+  
+  variants:
+    # GPTQ - No noise (baseline)
+    - name: "gptq_noise_0pct"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise: null
+    
+    # GPTQ - 2.5% noise
+    - name: "gptq_noise_2.5pct"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise:
+        enabled: true
+        function: "proportional"
+        function_params:
+          scale: 0.025
+        mode: "static"
+        seed: 42
+    
+    # GPTQ - 5% noise
+    - name: "gptq_noise_5pct"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise:
+        enabled: true
+        function: "proportional"
+        function_params:
+          scale: 0.05
+        mode: "static"
+        seed: 42
+    
+    # GPTQ - 10% noise
+    - name: "gptq_noise_10pct"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise:
+        enabled: true
+        function: "proportional"
+        function_params:
+          scale: 0.10
+        mode: "static"
+        seed: 42
+    
+    # NA-GPTQ - No noise (baseline, but optimized for 5% noise)
+    - name: "na_gptq_noise_0pct"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # Optimized for 5% proportional noise: σ = 0.05 * |z|
+          sigma_params:
+            sigma0: 0.0
+            alpha: 0.05
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise: null
+    
+    # NA-GPTQ - 2.5% noise (optimized FOR 2.5% noise)
+    - name: "na_gptq_noise_2.5pct"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = 0.025 * |z| (matches 2.5% noise injection)
+          sigma_params:
+            sigma0: 0.0
+            alpha: 0.025
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise:
+        enabled: true
+        function: "proportional"
+        function_params:
+          scale: 0.025
+        mode: "static"
+        seed: 42
+    
+    # NA-GPTQ - 5% noise (optimized FOR 5% noise)
+    - name: "na_gptq_noise_5pct"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = 0.05 * |z| (matches 5% noise injection)
+          sigma_params:
+            sigma0: 0.0
+            alpha: 0.05
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise:
+        enabled: true
+        function: "proportional"
+        function_params:
+          scale: 0.05
+        mode: "static"
+        seed: 42
+    
+    # NA-GPTQ - 10% noise (optimized FOR 10% noise)
+    - name: "na_gptq_noise_10pct"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = 0.10 * |z| (matches 10% noise injection)
+          sigma_params:
+            sigma0: 0.0
+            alpha: 0.10
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise:
+        enabled: true
+        function: "proportional"
+        function_params:
+          scale: 0.10
+        mode: "static"
+        seed: 42
+
+evaluation:
+  tasks:
+    - "hellaswag"
+  batch_size: 8
+  num_fewshot: null
+  limit: 100  # Set to null for full evaluation
+  device: null

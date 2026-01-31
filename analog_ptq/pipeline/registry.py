@@ -221,8 +221,10 @@ def register_evaluator(name: str) -> Callable[[Type], Type]:
 def _register_builtins():
     """Register built-in quantizers."""
     from analog_ptq.quantization.gptq import GPTQQuantizer
+    from analog_ptq.quantization.na_gptq import NAGPTQQuantizer
     
     registry._quantizers["gptq"] = GPTQQuantizer
+    registry._quantizers["na_gptq"] = NAGPTQQuantizer
 
 
 # Call at import time

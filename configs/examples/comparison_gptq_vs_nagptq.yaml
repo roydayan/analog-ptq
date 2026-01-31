@@ -1,0 +1,89 @@
+# Comparison: Original vs GPTQ vs NA-GPTQ
+#
+# This config compares three model variants:
+#   1. Original (no quantization)
+#   2. GPTQ quantized (4-bit)
+#   3. NA-GPTQ quantized (4-bit, noise-aware)
+#
+# Each variant is evaluated on the same benchmarks for fair comparison.
+#
+# Model Caching:
+#   Quantized models are cached to disk. If you run this config again,
+#   cached models will be loaded instead of re-quantizing.
+#   Set force_requantize: true in the comparison section to force re-quantization.
+#
+# Usage:
+#   analog-ptq-compare configs/examples/comparison_gptq_vs_nagptq.yaml
+
+experiment:
+  name: "comparison_gptq_vs_nagptq"
+  output_dir: "./outputs/comparison_gptq_vs_nagptq"
+  seed: 42
+
+model:
+  name_or_path: "meta-llama/Llama-3.2-1B-Instruct"
+  dtype: "float16"
+  device_map: "auto"
+  trust_remote_code: false
+
+comparison:
+  # Use the same calibration data for all quantized variants
+  shared_calibration: true
+  calibration:
+    dataset: "wikitext"
+    num_samples: 128
+    seq_length: 2048
+    seed: 42
+  
+  variants:
+    # Variant 1: Original model (no quantization)
+    - name: "original"
+      enabled: true
+      quantization: null
+      noise: null
+    
+    # Variant 2: Standard GPTQ (4-bit)
+    - name: "gptq_4bit"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise: null
+    
+    # Variant 3: Noise-Aware GPTQ (4-bit)
+    - name: "na_gptq_4bit"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          # NA-GPTQ parameters
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = sigma0 + alpha*|z| = 0 + 0.05*|z| (proportional noise)
+          sigma_params:
+            sigma0: 0.0
+            alpha: 0.05
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise: null
+
+evaluation:
+  tasks:
+    - "hellaswag"
+    - "arc_easy"
+  batch_size: 8
+  num_fewshot: null
+  limit: 100  # Set to null for full evaluation
+  device: null  # Auto-detect

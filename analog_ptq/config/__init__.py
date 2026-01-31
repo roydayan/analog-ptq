@@ -6,6 +6,10 @@ from analog_ptq.config.schema import (
     QuantizationConfig,
     EvaluationConfig,
     CalibrationConfig,
+    NoiseConfig,
+    ModelVariantConfig,
+    ComparisonConfig,
+    ComparisonExperimentConfig,
     load_config,
 )
 
@@ -15,5 +19,9 @@ __all__ = [
     "QuantizationConfig",
     "EvaluationConfig",
     "CalibrationConfig",
+    "NoiseConfig",
+    "ModelVariantConfig",
+    "ComparisonConfig",
+    "ComparisonExperimentConfig",
     "load_config",
 ]

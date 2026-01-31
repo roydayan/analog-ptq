@@ -1,0 +1,136 @@
+# Comparison: GPTQ vs NA-GPTQ on a SMALL model (for quick testing)
+#
+# Uses facebook/opt-125m (125M parameters) - runs in ~2-5 minutes total
+# Great for testing the pipeline before running on larger models.
+#
+# Usage:
+#   analog-ptq-compare configs/examples/comparison_small_model.yaml
+#
+# Model Caching:
+#   By default, if a quantized model already exists in the output directory,
+#   it will be loaded instead of re-quantizing. Set force_requantize: true
+#   to always re-quantize even if cached models exist.
+
+experiment:
+  name: "comparison_small_model"
+  output_dir: "./outputs/comparison_small_model"
+  seed: 42
+
+model:
+  # Small model for quick testing (~125M parameters)
+  # Using float32 to avoid dtype mismatch issues with OPT models
+  name_or_path: "facebook/opt-125m"
+  dtype: "float32"
+  device_map: "cuda:4"  # Single GPU for quantization
+  trust_remote_code: false
+
+comparison:
+  shared_calibration: true
+  # Set to true to force re-quantization even if cached models exist
+  force_requantize: false
+  calibration:
+    dataset: "wikitext"
+    num_samples: 32  # Fewer samples for faster calibration
+    seq_length: 512  # Shorter sequences
+    seed: 42
+  
+  variants:
+    # Original model (no quantization)
+    - name: "original"
+      enabled: true
+      quantization: null
+      noise: null
+    
+    # Standard GPTQ (4-bit)
+    - name: "gptq_4bit"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise: null
+    
+    # NA-GPTQ (4-bit)
+    - name: "na_gptq_4bit"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = sigma0 + alpha*|z| = 0 + 0.05*|z| (matches proportional noise)
+          sigma_params:
+            sigma0: 0.0    # No constant offset (pure proportional)
+            alpha: 0.05    # Slope: σ = 0.05 * |z|
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise: null
+    
+    # GPTQ with noise
+    - name: "gptq_noisy"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise:
+        enabled: true
+        function: "proportional"
+        function_params:
+          scale: 0.05
+        mode: "static"
+        seed: 42
+    
+    # NA-GPTQ with noise (should be more robust)
+    # IMPORTANT: NA-GPTQ's sigma model MUST match the noise injection model!
+    - name: "na_gptq_noisy"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = sigma0 + alpha*|z| = 0 + 0.05*|z| (SAME as noise injection below)
+          sigma_params:
+            sigma0: 0.0    # No offset (matches proportional noise)
+            alpha: 0.05    # Same as noise injection scale
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise:
+        enabled: true
+        # σ = scale * |w| = 0.05 * |w| (SAME as NA-GPTQ's alpha)
+        function: "proportional"
+        function_params:
+          scale: 0.05
+        mode: "static"
+        seed: 42
+
+evaluation:
+  tasks:
+    - "hellaswag"  # Single task for quick testing
+  batch_size: 8
+  num_fewshot: null
+  limit: 50  # Small limit for fast evaluation
+  device: null

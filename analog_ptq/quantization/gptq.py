@@ -7,6 +7,8 @@ References:
     - GPTQ paper: https://arxiv.org/abs/2210.17323
 """
 
+import os
+import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
@@ -117,7 +119,10 @@ class GPTQQuantizer(BaseQuantizer):
         dtype = next(model.model.parameters()).dtype
         
         # Process layers sequentially
+        _debug = os.environ.get("NAGPTQ_DEBUG", "0") == "1"
+        
         for layer_idx in range(model.num_layers()):
+            _layer_start = time.perf_counter()
             logger.info(f"Quantizing layer {layer_idx + 1}/{model.num_layers()}")
             
             # Get all linear layers in this transformer layer
@@ -129,11 +134,18 @@ class GPTQQuantizer(BaseQuantizer):
             
             # Quantize each linear layer - capture inputs per linear layer
             layer_module = model.get_layer(layer_idx)
+            _debug = os.environ.get("NAGPTQ_DEBUG", "0") == "1"
+            
             for name, linear in linear_layers.items():
                 # Capture inputs specifically for this linear layer
+                _t0 = time.perf_counter()
                 linear_inputs = self._capture_linear_layer_inputs(
                     model, linear, calibration_data
                 )
+                _t1 = time.perf_counter()
+                
+                if _debug:
+                    logger.info(f"  [DEBUG] Input capture for {name}: {_t1-_t0:.3f}s")
                 
                 self._quantize_linear_layer(
                     layer_module,
@@ -142,9 +154,17 @@ class GPTQQuantizer(BaseQuantizer):
                     linear_inputs,
                     device,
                 )
+                _t2 = time.perf_counter()
+                
+                if _debug:
+                    logger.info(f"  [DEBUG] Quantization for {name}: {_t2-_t1:.3f}s")
             
             # Clear captured inputs to save memory
                 del linear_inputs
+            
+            if _debug:
+                _layer_elapsed = time.perf_counter() - _layer_start
+                logger.info(f"  [DEBUG] Layer {layer_idx + 1} total: {_layer_elapsed:.3f}s")
             
             torch.cuda.empty_cache() if torch.cuda.is_available() else None
         
@@ -266,16 +286,33 @@ class GPTQQuantizer(BaseQuantizer):
             layer_inputs: Captured inputs for Hessian computation
             device: Device for computation
         """
-        logger.debug(f"  Quantizing {name}: {linear.in_features} -> {linear.out_features}")
+        _debug = os.environ.get("NAGPTQ_DEBUG", "0") == "1"
+        _layer_start = time.perf_counter()
+        
+        if _debug:
+            logger.info(f"    [DEBUG] GPTQ quantizing {name}: "
+                       f"{linear.in_features} -> {linear.out_features}")
+        else:
+            logger.debug(f"  Quantizing {name}: {linear.in_features} -> {linear.out_features}")
         
         # Get the weight
         W = linear.weight.data.clone().float()
         
         # Compute Hessian approximation
+        _t0 = time.perf_counter()
         H = self._compute_hessian(layer_inputs, linear, device)
+        _t1 = time.perf_counter()
+        
+        if _debug:
+            logger.info(f"    [TIMER] Hessian computation: {_t1-_t0:.3f}s")
         
         # Quantize weight using GPTQ algorithm
         Q, scales, zeros = self._quantize_weight(W, H)
+        _t2 = time.perf_counter()
+        
+        if _debug:
+            logger.info(f"    [TIMER] Weight quantization: {_t2-_t1:.3f}s")
+            logger.info(f"    [DEBUG] {name} total: {_t2-_layer_start:.3f}s")
         
         # Create quantized layer
         qlayer = QuantizedLinear(

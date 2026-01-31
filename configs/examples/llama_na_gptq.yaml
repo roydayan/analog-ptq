@@ -1,0 +1,76 @@
+# Example configuration for quantizing LLaMA-3.2-1B-Instruct with Noise-Aware GPTQ
+# 
+# NA-GPTQ optimizes the expected reconstruction error including analog noise:
+#   J(ŵ) = (w - ŵ)ᵀ H (w - ŵ) + Σᵢ aᵢ σ²(ŵᵢ)
+#
+# Key benefits:
+#   - Noise-aware rounding considers both quantization error and noise penalty
+#   - Better robustness when deploying on analog hardware with noisy weights
+#
+# Usage:
+#   analog-ptq configs/examples/llama_na_gptq.yaml
+#   # or
+#   python scripts/run_experiment.py configs/examples/llama_na_gptq.yaml
+
+experiment:
+  name: "llama3.2-1b-instruct-na-gptq-4bit"
+  output_dir: "./outputs/llama3.2-1b-instruct-na-gptq"
+  seed: 42
+
+model:
+  name_or_path: "meta-llama/Llama-3.2-1B-Instruct"
+  dtype: "float16"
+  device_map: "cuda:1"
+  trust_remote_code: false
+
+quantization:
+  method: "na_gptq"  # Use Noise-Aware GPTQ
+  bits: 4
+  group_size: 128
+  symmetric: true    # NA-GPTQ uses symmetric quantization
+  damp_percent: 0.01
+  block_size: 128
+  actorder: false
+  calibration:
+    dataset: "wikitext"
+    num_samples: 128
+    seq_length: 2048
+    seed: 42
+  # NA-GPTQ specific parameters
+  extra:
+    # Soft assignment temperature (relative to step size)
+    # Smaller = sharper (closer to hard rounding), larger = softer
+    tau: 0.1
+    # Sigma model: how noise variance depends on quantization level
+    # Options: "constant", "affine", "power", "lookup"
+    sigma_model: "affine"
+    # Parameters for the sigma model
+    # For affine: σ(z) = σ₀ + α|z|
+    sigma_params:
+      sigma0: 0.01   # Base noise standard deviation
+      alpha: 0.05    # Slope of linear dependence on |z|
+    # Whether to include ρ'' term in weight updates
+    # False = simpler and more stable, True = potentially better but needs tuning
+    use_second_derivative: false
+    # Floor for diagonal D matrix (numerical stability)
+    diag_floor: 1e-8
+
+# Optional: Apply additional noise for evaluation
+# noise:
+#   enabled: true
+#   function: "affine"
+#   function_params:
+#     scale: 0.05
+#     offset: 0.01
+#   mode: "static"
+#   seed: 42
+
+# Evaluation disabled - uncomment to evaluate
+# evaluation:
+#   tasks:
+#     - "winogrande"
+#     - "piqa" 
+#     - "boolq"
+#   batch_size: 8
+#   num_fewshot: 0
+#   limit: 100

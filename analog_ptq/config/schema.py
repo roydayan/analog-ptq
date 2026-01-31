@@ -13,6 +13,11 @@ class ExperimentMeta(BaseModel):
     name: str = Field(..., description="Experiment name")
     output_dir: str = Field("./outputs", description="Output directory")
     seed: int = Field(42, description="Random seed")
+    force_requantize: bool = Field(
+        False,
+        description="Force re-quantization even if cached model exists. "
+                    "If False, loads existing quantized model from output directory."
+    )
     
     @field_validator("output_dir")
     @classmethod
@@ -145,6 +150,107 @@ class EvaluationConfig(BaseModel):
         if v < 1:
             raise ValueError("batch_size must be positive")
         return v
+
+
+class ModelVariantConfig(BaseModel):
+    """Configuration for a single model variant in a comparison.
+    
+    Represents one configuration point in the comparison matrix.
+    """
+    
+    name: str = Field(..., description="Name for this variant (e.g., 'original', 'gptq', 'na_gptq')")
+    enabled: bool = Field(True, description="Whether to include this variant in comparison")
+    quantization: Optional[QuantizationConfig] = Field(
+        None,
+        description="Quantization config (None = no quantization, i.e. original model)"
+    )
+    noise: Optional[NoiseConfig] = Field(
+        None,
+        description="Noise config for this variant"
+    )
+
+
+class ComparisonConfig(BaseModel):
+    """Configuration for comparing multiple model variants.
+    
+    Supports comparing original, GPTQ, NA-GPTQ models with optional noise injection.
+    Each variant can have its own quantization and noise settings.
+    
+    Example config:
+        comparison:
+          variants:
+            - name: original
+              enabled: true
+              quantization: null
+              noise: null
+            - name: gptq_clean
+              enabled: true
+              quantization:
+                method: gptq
+                bits: 4
+              noise: null
+            - name: gptq_noisy
+              enabled: true
+              quantization:
+                method: gptq
+                bits: 4
+              noise:
+                enabled: true
+                function: proportional
+                function_params:
+                  scale: 0.05
+    """
+    
+    variants: List[ModelVariantConfig] = Field(
+        ..., 
+        description="List of model variants to compare",
+        min_length=1
+    )
+    force_requantize: bool = Field(
+        False,
+        description="Force re-quantization even if cached model exists. "
+                    "If False, loads existing quantized model from output directory."
+    )
+    shared_calibration: bool = Field(
+        True, 
+        description="Use same calibration data across all quantized variants"
+    )
+    calibration: CalibrationConfig = Field(
+        default_factory=CalibrationConfig,
+        description="Shared calibration config for all quantized variants"
+    )
+    
+    def get_enabled_variants(self) -> List[ModelVariantConfig]:
+        """Return only enabled variants."""
+        return [v for v in self.variants if v.enabled]
+
+
+class ComparisonExperimentConfig(BaseModel):
+    """Full configuration for a comparison experiment.
+    
+    Similar to ExperimentConfig but designed for comparing multiple model variants.
+    """
+    
+    experiment: ExperimentMeta
+    model: ModelConfig
+    comparison: ComparisonConfig
+    evaluation: Optional[EvaluationConfig] = None
+    
+    @classmethod
+    def from_yaml(cls, path: Union[str, Path]) -> "ComparisonExperimentConfig":
+        """Load configuration from a YAML file."""
+        path = Path(path)
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        return cls(**data)
+    
+    def to_yaml(self, path: Union[str, Path]) -> None:
+        """Save configuration to a YAML file."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(path, "w") as f:
+            yaml.dump(self.model_dump(), f, default_flow_style=False, sort_keys=False)
 
 
 class ExperimentConfig(BaseModel):

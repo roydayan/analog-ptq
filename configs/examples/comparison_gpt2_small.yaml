@@ -1,0 +1,122 @@
+# Comparison: GPTQ vs NA-GPTQ on GPT-2 (124M parameters)
+#
+# GPT-2 works better with float16 than OPT models.
+# Good for quick testing - runs in ~2-5 minutes.
+#
+# Usage:
+#   analog-ptq-compare configs/examples/comparison_gpt2_small.yaml
+
+experiment:
+  name: "comparison_gpt2_small"
+  output_dir: "./outputs/comparison_gpt2_small"
+  seed: 42
+
+model:
+  name_or_path: "gpt2"  # 124M parameters, works well with float16
+  dtype: "float16"
+  device_map: "cuda:4"
+  trust_remote_code: false
+
+comparison:
+  shared_calibration: true
+  calibration:
+    dataset: "wikitext"
+    num_samples: 32
+    seq_length: 512
+    seed: 42
+  
+  variants:
+    - name: "original"
+      enabled: true
+      quantization: null
+      noise: null
+    
+    - name: "gptq_4bit"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise: null
+    
+    - name: "na_gptq_4bit"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = sigma0 + alpha*|z| = 0 + 0.05*|z| (matches proportional)
+          sigma_params:
+            sigma0: 0.0
+            alpha: 0.05
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise: null
+    
+    - name: "gptq_noisy"
+      enabled: true
+      quantization:
+        method: "gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra: {}
+      noise:
+        enabled: true
+        function: "proportional"
+        function_params:
+          scale: 0.05
+        mode: "static"
+        seed: 42
+    
+    # NA-GPTQ with matching noise model
+    - name: "na_gptq_noisy"
+      enabled: true
+      quantization:
+        method: "na_gptq"
+        bits: 4
+        group_size: 128
+        symmetric: true
+        damp_percent: 0.01
+        block_size: 128
+        actorder: false
+        extra:
+          tau: 0.1
+          sigma_model: "affine"
+          # σ = sigma0 + alpha*|z| = 0 + 0.05*|z| (SAME as noise injection)
+          sigma_params:
+            sigma0: 0.0
+            alpha: 0.05
+          use_second_derivative: false
+          diag_floor: 1.0e-8
+      noise:
+        enabled: true
+        # σ = scale * |w| = 0.05 * |w| (SAME as NA-GPTQ model)
+        function: "proportional"
+        function_params:
+          scale: 0.05
+        mode: "static"
+        seed: 42
+
+evaluation:
+  tasks:
+    - "hellaswag"
+  batch_size: 8
+  num_fewshot: null
+  limit: 50
+  device: null
